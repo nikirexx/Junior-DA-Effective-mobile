@@ -1,1 +1,0 @@
-# Junior-DA-Effective-mobile
