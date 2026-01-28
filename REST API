@@ -1,0 +1,136 @@
+REST API под заданный UI (поля: First Name, Last Name, UserName, Password + reCAPTCHA), а также 3 показанных сценария ошибок:
+- password policy
+- User exists!
+- Please verify reCaptcha to register!
+И успех “User Register Successfully.”
+
+1) HTTP метод + URL
+POST /api/v1/auth/register
+Назначение: регистрация пользователя при нажатии Register.
+
+2) Входные параметры (Request)
+Headers
+Content-Type: application/json - обязательно
+Accept: application/json - желательно
+
+Body (JSON)
+| Параметр         | Тип    | Обязат. | Ограничения / правила                                                                                                     |
+| ---------------- | ------ | ------: | ------------------------------------------------------------------------------------------------------------------------- |
+| `firstName`      | string |      да | `minLength: 1`, `maxLength: 50`, trim; допустимо: буквы/пробел/дефис (на усмотрение)                                      |
+| `lastName`       | string |      да | `minLength: 1`, `maxLength: 50`, trim                                                                                     |
+| `userName`       | string |      да | `minLength: 3`, `maxLength: 30`, уникален; допустимо: латиница/цифры/`_`/`.`/`-`                                          |
+| `password`       | string |      да | минимум 8 символов, минимум 1 **non-alphanumeric**, 1 цифра, 1 uppercase, 1 lowercase                                     |
+| `recaptchaToken` | string |      да | токен reCAPTCHA, полученный на фронте после "I’m not a robot"                                                             |
+
+Так как  UI показывает отдельную ошибку "Please verify reCaptcha to register!" - значит recaptchaToken обязателен для вызова.
+
+3) Успешный ответ
+Код
+201 Created
+
+Response Body (JSON)
+| Параметр    | Тип                | Обязат. | Ограничения / комментарии                              |
+| ----------- | ------------------ | ------: | ------------------------------------------------------ |
+| `userId`    | string (uuid)      |      да | UUID нового пользователя                               |
+| `userName`  | string             |      да | как в запросе                                          |
+| `firstName` | string             |      да | как в запросе                                          |
+| `lastName`  | string             |      да | как в запросе                                          |
+| `createdAt` | string (date-time) |      да | ISO 8601                                               |
+| `message`   | string             |      да | например "User Register Successfully."                 |
+
+
+
+4) Ответ с ошибкой (единый формат)
+
+Response Body (JSON)
+| Параметр                | Тип    | Обязат. | Описание                                                                     |
+| ----------------------- | ------ | ------: | ---------------------------------------------------------------------------- |
+| `code`                  | string |      да | машинный код ошибки (`VALIDATION_ERROR`, `USER_EXISTS`, `CAPTCHA_REQUIRED`…) |
+| `message`               | string |      да | текст для отображения пользователю (как в UI)                                |
+| `fieldErrors`           | array  |     нет | ошибки по полям (если нужно подсветить поля)                                 |
+| `fieldErrors[].field`   | string |     да* | `firstName` / `lastName` / `userName` / `password` / `recaptchaToken`        |
+| `fieldErrors[].message` | string |     да* | текст ошибки по полю                                                         |
+
+* — обязательно, если fieldErrors присутствует.
+
+
+
+5) Коды ошибок
+Клиентские (4xx):
+1. 422 Unprocessable Entity — ошибки валидации полей (пароль не соответствует политике, не заполнены поля, не пройдена captcha)
+code: VALIDATION_ERROR (для пароля/пустых полей)
+code: CAPTCHA_REQUIRED (если не подтверждена) / CAPTCHA_INVALID (если токен неверный)
+2. 409 Conflict — пользователь уже существует
+code: USER_EXISTS, message: "User exists!"
+3. 400 Bad Request — некорректный JSON/формат запроса
+code: BAD_REQUEST
+
+Серверные (5xx):
+1. 500 Internal Server Error — непредвиденная ошибка
+2. 503 Service Unavailable — временно недоступны зависимости (БД/проверка captcha)
+
+
+
+6) Пример запроса (успех)
+
+POST /api/v1/auth/register
+Content-Type: application/json
+Accept: application/json
+
+{
+  "firstName": "ivan",
+  "lastName": "ivanov",
+  "userName": "ivan",
+  "password": "Qwerty!234",
+  "recaptchaToken": "03AFcWeA...token_from_recaptcha..."
+}
+
+7) Пример успешного ответа (201)
+
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{
+  "userId": "b7b7a6b5-1d2b-4e63-9f1c-4d0c0b1a9c77",
+  "userName": "ivan",
+  "firstName": "ivan",
+  "lastName": "ivanov",
+  "createdAt": "2026-01-08T15:40:12Z",
+  "message": "User Register Successfully."
+}
+
+8) Пример ошибки: пароль не соответствует политике (422)
+
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "fieldErrors": [
+    {
+      "field": "password",
+      "message": "Password must have at least one non alphanumeric character, one digit ('0'-'9'), one uppercase ('A'-'Z'), one lowercase ('a'-'z') and Password must be eight characters or longer."
+    }
+  ]
+}
+
+9) Пример ошибки: пользователь уже существует (409)
+
+HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{
+  "code": "USER_EXISTS",
+  "message": "User exists!"
+}
+
+10) Пример ошибки: не подтверждена reCAPTCHA (422)
+
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "code": "CAPTCHA_REQUIRED",
+  "message": "Please verify reCaptcha to register!"
+}
