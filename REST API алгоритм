@@ -1,0 +1,121 @@
+Алгоритм регистрации пользователя
+
+Входные данные
+firstName (строка)
+lastName (строка)
+userName (строка)
+password (строка)
+recaptchaToken (строка)
+
+1. Приём и первичная проверка запроса
+  1. Принять запрос POST /api/v1/auth/register.
+  2.Проверить заголовок Content-Type:
+  - если отсутствует или не равен application/json, вернуть:
+    - HTTP 400 Bad Request
+    - code = BAD_REQUEST
+    - message = "Invalid Content-Type"
+  3. Выполнить разбор тела запроса как JSON:
+  - если разбор неуспешен (ошибка синтаксиса JSON), вернуть:
+    - HTTP 400 Bad Request
+    - code = BAD_REQUEST
+    - message = "Invalid JSON"
+
+2. Нормализация данных
+  4. Применить нормализацию к строковым полям:
+  - trim (удаление пробелов по краям) для firstName, lastName, userName, recaptchaToken
+  - при необходимости зафиксировать правило регистра для userName (например, хранение в нижнем регистре). Если правило принято — привести userName к нижнему регистру до дальнейших проверок.
+
+3. Проверка обязательности полей
+  5. Проверить наличие и непустоту обязательных полей:
+  - Если recaptchaToken отсутствует или пустой, вернуть:
+    - HTTP 422 Unprocessable Entity
+    - code = CAPTCHA_REQUIRED
+    - message = "Please verify reCaptcha to register!"
+  - Если любое из полей firstName, lastName, userName, password отсутствует или пустое, вернуть:
+    - HTTP 422 Unprocessable Entity
+    - code = VALIDATION_ERROR
+    - message = "Validation failed"
+    - fieldErrors с указанием соответствующих полей.
+
+4. Проверка формата и ограничений полей
+  6. Проверить firstName:
+    - длина в пределах допустимого диапазона (например, 1…50)
+    - допустимые символы (правило должно быть определено, например: буквы, пробел, дефис)
+  При нарушении вернуть:
+    - HTTP 422
+    - code = VALIDATION_ERROR
+    - fieldErrors с ошибкой по firstName
+  7. Проверить lastName:
+    - длина 1…50
+    - допустимые символы (по принятому правилу)
+  При нарушении вернуть:
+    - HTTP 422
+    - code = VALIDATION_ERROR
+    - fieldErrors с ошибкой по lastName
+  8. Проверить userName:
+    - длина (например, 3…30)
+    - допустимые символы (правило должно быть определено, например: латиница, цифры, ., _, -)
+  При нарушении вернуть:
+    - HTTP 422
+    - code = VALIDATION_ERROR
+    - fieldErrors с ошибкой по userName
+
+5. Проверка reCAPTCHA
+    9. Выполнить серверную проверку recaptchaToken через сервис проверки reCAPTCHA:
+      - отправить запрос на сторону провайдера (server-to-server)
+      - проверить успешность (success=true)
+      - при необходимости проверить дополнительные параметры (например, action, hostname, score)
+  10. Если проверка reCAPTCHA неуспешна (токен неверен/истёк срок/проверка не пройдена), вернуть:
+      - HTTP 422 Unprocessable Entity
+      - code = CAPTCHA_INVALID
+      - message = "Please verify reCaptcha to register!"
+
+6. Проверка политики пароля
+  11. Выполнить проверку password на соответствие политике (согласно сообщению в интерфейсе):
+    - минимум 8 символов
+    - минимум 1 неалфавитно-цифровой символ
+    - минимум 1 цифра 0-9
+    - минимум 1 заглавная буква A-Z
+    - минимум 1 строчная буква a-z
+  12. Если пароль не соответствует политике, вернуть:
+    - HTTP 422 Unprocessable Entity
+    - code = VALIDATION_ERROR
+    - fieldErrors[password] с текстом:
+      - "Password must have at least one non alphanumeric character, one digit ('0'-'9'), one uppercase ('A'-'Z'), one lowercase ('a'-'z') and Password must be eight characters or longer."
+
+7. Проверка уникальности пользователя
+  13. Выполнить проверку уникальности userName в базе данных:
+    - запрос вида: SELECT 1 FROM users WHERE user_name = :userName LIMIT 1
+  14. Если пользователь с таким userName уже существует, вернуть:
+    - HTTP 409 Conflict
+    - code = USER_EXISTS
+    - message = "User exists!"
+
+8. Подготовка данных для записи в базу данных
+  15. Сформировать идентификатор пользователя:
+    - userId = UUID
+  16. Сформировать безопасное представление пароля:
+    - вычислить хэш пароля с использованием криптографически стойкого алгоритма (например, Argon2id или bcrypt)
+    - сформировать passwordHash (и соль, если требуется выбранным алгоритмом)
+
+9. Создание пользователя в базе данных (транзакционно)
+  17. Открыть транзакцию.
+  18. Выполнить вставку записи пользователя:
+    - INSERT INTO users (user_id, first_name, last_name, user_name, password_hash, created_at, status) VALUES (...)
+  19. Обработать конфликт уникальности на уровне базы данных:
+    - если при вставке возникло нарушение уникального ограничения по user_name (возможна параллельная регистрация), вернуть:
+      - HTTP 409 Conflict
+      - code = USER_EXISTS
+      - message = "User exists!"
+  20. Зафиксировать транзакцию.  
+
+10. Формирование успешного ответа
+  21. Вернуть успешный ответ:
+    - HTTP 201 Created
+    - тело ответа:
+      - userId (uuid)
+      - userName
+      - firstName
+      - lastName
+      - createdAt (ISO 8601)
+      - message = "User Register Successfully."
